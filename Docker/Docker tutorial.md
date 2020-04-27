@@ -233,14 +233,14 @@ docker run -d --name es --net foodtrucks-net -p 9200:9200 -p 9300:9300 -e "disco
 docker network inspect foodtrucks-net
 
 # foddtrucks-net 네트워크에서 런칭
-docker run -it --rm --net foodtrucks-net prakhar1989/foodtrucks-web bash
+docker run -it --rm --net foodtrucks-net raccoonhj33/foodtrucks-web bash
 root@9d2722cf282c:/opt/flask-app# curl es:9200
 root@9d2722cf282c:/opt/flask-app# ls
 root@9d2722cf282c:/opt/flask-app# python app.py
 root@9d2722cf282c:/opt/flask-app# exit
 
 # Flask 컨테이너 출시
-docker run -d --net foodtrucks-net -p 5000:5000 --name foodtrucks-web prakhar1989/foodtrucks-web
+docker run -d --net foodtrucks-net -p 5000:5000 --name foodtrucks-web raccoonhj33/foodtrucks-web
 docker container ls
 curl -I 0.0.0.0:5000
 ```
@@ -339,3 +339,160 @@ docker network ls
 docker ps
 docker network inspect foodtrucks_default
 ```
+
+
+
+###### AWS Elastic Container Service
+
+마지막 섹션에서는 docker-compose up이라는 단일 명령으로 docker-compose를 사용하여 앱을 로컬로 실행했습니다. 이제 우리는 기능적인 응용 프로그램을 가지고 있기 때문에 우리는 이것을 세계와 공유하고, 일부 사용자를 얻고, 많은 돈을 벌고, 마이애미에서 큰 집을 사고 싶습니다. 마지막 세 가지를 실행하는 것은 자습서의 범위를 벗어나므로 AWS를 사용하여 클라우드에 멀티 컨테이너 앱을 배포 할 수있는 방법을 찾는 데 시간을 할애합니다.
+
+지금까지 읽어 보셨다면 Docker가 매우 멋진 기술이라고 확신합니다. 그리고 당신은 혼자가 아닙니다. Docker가 급격히 증가함에 따라 거의 모든 클라우드 공급 업체가 플랫폼에 Docker 앱을 배포하기위한 지원을 추가하기 시작했습니다. 현재 Google Cloud Platform, AWS, Azure 및 기타 여러 곳에 컨테이너를 배포 할 수 있습니다. Elastic Beanstalk를 사용하여 단일 컨테이너 앱을 배포하는 데 대한 입문서를 이미 얻었으며이 섹션에서는 AWS의 Elastic Container Service (또는 ECS)를 살펴 보겠습니다.
+
+AWS ECS는 Docker 컨테이너를 지원하는 확장 가능하고 매우 유연한 컨테이너 관리 서비스입니다. 사용하기 쉬운 API를 통해 EC2 인스턴스 위에서 Docker 클러스터를 운영 할 수 있습니다. Beanstalk가 합리적인 기본값으로 제공되는 경우 ECS를 사용하면 필요에 따라 환경을 완전히 조정할 수 있습니다. 내 생각에 ECS는 시작하기가 상당히 복잡합니다.
+
+운 좋게도 ECS에는 Docker Compose 파일을 이해하고 ECS에서 클러스터를 자동으로 프로비저닝하는 친숙한 CLI 도구가 있습니다! 이미 작동하는 docker-compose.yml이 있으므로 AWS를 시작하고 실행하는 데 많은 노력을 기울이지 않아야합니다. 이제 시작하겠습니다!
+
+첫 번째 단계는 CLI를 설치하는 것입니다. Mac과 Linux 모두에 CLI를 설치하는 방법은 공식 문서에 매우 명확하게 설명되어 있습니다. 계속해서 CLI를 설치하고 완료되면 다음을 실행하여 설치를 확인하십시오.
+
+```shell
+$ ecs-cli --version
+ecs-cli version 1.18.1 (7e9df84)
+```
+
+다음으로 ECS와 통신 할 수 있도록 CLI 구성 작업을 진행합니다. AWS ECS 문서의 공식 안내서에 자세히 설명 된 단계를 수행합니다. 혼동이있는 경우 해당 안내서를 참조하십시오.
+
+첫 번째 단계는 나머지 튜토리얼에서 사용할 프로파일을 만드는 것입니다. 계속하려면 AWS_ACCESS_KEY_ID 및 AWS_SECRET_ACCESS_KEY가 필요합니다. 이를 얻으려면이 페이지의 액세스 키 및 비밀 액세스 키 섹션에 자세히 설명 된 단계를 수행하십시오.
+
+```shell
+$ ecs-cli configure profile --profile-name ecs-foodtrucks --access-key $AWS_ACCESS_KEY_ID --secret-key $AWS_SECRET_ACCESS_KEY
+```
+
+다음으로 인스턴스에 로그인하는 데 사용할 키 페어를 가져와야합니다. EC2 콘솔로 가서 새 키 페어를 만듭니다. 키 페어를 다운로드하여 안전한 장소에 보관하십시오. 이 화면에서 벗어나기 전에주의해야 할 또 다른 사항은 지역 이름입니다. 필자의 경우 키 이름을 ecs로 지정하고 내 지역을 us-east-1로 설정했습니다. 이것이이 연습의 나머지 부분에 대해 가정합니다.
+
+다음 단계는 CLI를 구성하는 것입니다.
+
+```shell
+$ ecs-cli configure --region us-east-1 --cluster foodtrucks
+INFO[0000] Saved ECS CLI configuration for cluster (foodtrucks)
+```
+
+클러스터에 상주 할 리전 이름과 클러스터 이름을 사용하여 configure 명령을 제공합니다. 키 쌍을 만들 때 사용한 것과 동일한 지역 이름을 제공해야합니다. 이전에 컴퓨터에서 AWS CLI를 구성하지 않은 경우 공식 안내서를 사용하여 모든 작업을 수행하는 방법에 대한 자세한 내용을 설명합니다.
+
+다음 단계는 CLI가 CloudFormation 템플릿을 생성 할 수 있도록합니다.
+
+```shell
+$ ecs-cli up --keypair ecs --capability-iam --size 1 --instance-type t2.medium
+INFO[0000] Using recommended Amazon Linux 2 AMI with ECS Agent 1.39.0 and Docker version 18.09.9-ce
+INFO[0000] Created cluster                               cluster=foodtrucks
+INFO[0001] Waiting for your cluster resources to be created
+INFO[0001] Cloudformation stack status                   stackStatus=CREATE_IN_PROGRESS
+INFO[0062] Cloudformation stack status                   stackStatus=CREATE_IN_PROGRESS
+INFO[0122] Cloudformation stack status                   stackStatus=CREATE_IN_PROGRESS
+INFO[0182] Cloudformation stack status                   stackStatus=CREATE_IN_PROGRESS
+INFO[0242] Cloudformation stack status                   stackStatus=CREATE_IN_PROGRESS
+VPC created: vpc-0bbed8536930053a6
+Security Group created: sg-0cf767fb4d01a3f99
+Subnet created: subnet-05de1db2cb1a50ab8
+Subnet created: subnet-01e1e8bc95d49d0fd
+Cluster creation succeeded.
+```
+
+여기서 처음에 다운로드 한 키 페어의 이름 (제 경우에는 ECS), 사용할 인스턴스 수 (--size) 및 컨테이너를 실행할 인스턴스 유형을 제공합니다. --capability-iam 플래그는이 명령이 IAM 리소스를 생성 할 수 있음을 CLI에 알려줍니다.
+
+마지막 단계는 docker-compose.yml 파일을 사용하는 단계입니다. 약간의 변경이 필요하므로 원본을 수정하는 대신 사본을 만들어 보겠습니다. 이 파일의 내용 (변경 후)은 다음과 같습니다 (아래).
+
+```yaml
+version: '2'
+services:
+  es:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.6.2
+    cpu_shares: 100
+    mem_limit: 3621440000
+    environment:
+      - discovery.type=single-node
+      - bootstrap.memory_lock=true
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    logging:
+      driver: awslogs
+      options:
+        awslogs-group: foodtrucks
+        awslogs-region: us-east-1
+        awslogs-stream-prefix: es
+  web:
+    image: prakhar1989/foodtrucks-web
+    cpu_shares: 100
+    mem_limit: 262144000
+    ports:
+      - "80:5000"
+    links:
+      - es
+    logging:
+      driver: awslogs
+      options:
+        awslogs-group: foodtrucks
+        awslogs-region: us-east-1
+        awslogs-stream-prefix: web
+```
+
+원래 docker-compose.yml에서 변경된 유일한 내용은 각 컨테이너에 mem_limit (바이트) 및 cpu_shares 값을 제공하고 로깅 구성을 추가하는 것입니다. 이를 통해 AWS Cloudwatch에서 컨테이너가 생성 한 로그를 볼 수 있습니다. ElasticSearch는 일반적으로 더 많은 메모리를 사용하므로 약 3.4GB의 메모리 제한이 있습니다. 다음 단계로 넘어 가기 전에해야 할 또 다른 일은 Docker Hub에 이미지를 게시하는 것입니다.
+
+```shell
+$ docker push prakhar1989/foodtrucks-web
+```
+
+큰! 이제 ECS에 앱을 배포 할 최종 명령을 실행하겠습니다!
+
+```shell
+$ cd aws-ecs
+$ ecs-cli compose up
+INFO[0000] Using ECS task definition                     TaskDefinition=ecscompose-foodtrucks:2
+INFO[0000] Starting container...                         container=845e2368-170d-44a7-bf9f-84c7fcd9ae29/es
+INFO[0000] Starting container...                         container=845e2368-170d-44a7-bf9f-84c7fcd9ae29/web
+INFO[0000] Describe ECS container status                 container=845e2368-170d-44a7-bf9f-84c7fcd9ae29/web desiredStatus=RUNNING lastStatus=PENDING taskDefinition=ecscompose-foodtrucks:2
+INFO[0000] Describe ECS container status                 container=845e2368-170d-44a7-bf9f-84c7fcd9ae29/es desiredStatus=RUNNING lastStatus=PENDING taskDefinition=ecscompose-foodtrucks:2
+INFO[0036] Describe ECS container status                 container=845e2368-170d-44a7-bf9f-84c7fcd9ae29/es desiredStatus=RUNNING lastStatus=PENDING taskDefinition=ecscompose-foodtrucks:2
+INFO[0048] Describe ECS container status                 container=845e2368-170d-44a7-bf9f-84c7fcd9ae29/web desiredStatus=RUNNING lastStatus=PENDING taskDefinition=ecscompose-foodtrucks:2
+INFO[0048] Describe ECS container status                 container=845e2368-170d-44a7-bf9f-84c7fcd9ae29/es desiredStatus=RUNNING lastStatus=PENDING taskDefinition=ecscompose-foodtrucks:2
+INFO[0060] Started container...                          container=845e2368-170d-44a7-bf9f-84c7fcd9ae29/web desiredStatus=RUNNING lastStatus=RUNNING taskDefinition=ecscompose-foodtrucks:2
+INFO[0060] Started container...                          container=845e2368-170d-44a7-bf9f-84c7fcd9ae29/es desiredStatus=RUNNING lastStatus=RUNNING taskDefinition=ecscompose-foodtrucks:2
+```
+
+위의 호출이 Docker Compose에서 사용한 호출과 유사하게 보이는 것은 우연이 아닙니다. 모든 것이 잘 되었다면, 마지막 줄에 원하는 Status = RUNNING lastStatus = RUNNING이 보일 것입니다.
+
+대박! 우리 앱은 라이브이지만 어떻게 액세스 할 수 있습니까?
+
+```shell
+ecs-cli ps
+Name                                      State    Ports                     TaskDefinition
+845e2368-170d-44a7-bf9f-84c7fcd9ae29/web  RUNNING  54.86.14.14:80->5000/tcp  ecscompose-foodtrucks:2
+845e2368-170d-44a7-bf9f-84c7fcd9ae29/es   RUNNING                            ecscompose-foodtrucks:2
+```
+
+계속해서 브라우저에서 http://54.86.14.14를 열면 음식 트럭이 모든 검은 노랑 영광으로 보일 것입니다! 주제에 대해 설명 했으므로 AWS ECS 콘솔의 모습을 살펴 보겠습니다.
+
+위에서 'foodtrucks'라는 ECS 클러스터가 생성되었으며 현재 2 개의 컨테이너 인스턴스로 1 개의 작업이 실행되고 있음을 알 수 있습니다. 이 콘솔을 탐색하는 데 시간을 보내면 여기에있는 모든 옵션을 사용할 수 있습니다.
+
+
+
+###### 대청소
+
+배포 된 앱으로 플레이 한 후에는 클러스터를 종료해야합니다.
+
+```shell
+$ ecs-cli down --force
+INFO[0001] Waiting for your cluster resources to be deleted...
+INFO[0001] Cloudformation stack status                   stackStatus=DELETE_IN_PROGRESS
+INFO[0062] Cloudformation stack status                   stackStatus=DELETE_IN_PROGRESS
+INFO[0124] Cloudformation stack status                   stackStatus=DELETE_IN_PROGRESS
+INFO[0155] Deleted cluster                               cluster=foodtrucks
+```
+
+그래서 당신은 그것을 가지고 있습니다. 몇 가지 명령만으로 AWS 클라우드에 멋진 앱을 배포 할 수있었습니다!
+
+
+
+###### 결론
+
+그리고 그것은 랩입니다! 길고 철저하지만 재미있는 튜토리얼을 마친 후 이제 컨테이너 세계를 폭풍으로 몰아 갈 준비가되었습니다! 끝까지 따라 가면 분명히 자신을 자랑스럽게 생각해야합니다. Docker를 설정하고, 자신의 컨테이너를 실행하고, 정적 및 동적 웹 사이트를 사용하는 방법을 배웠으며 가장 중요한 것은 클라우드에 응용 프로그램을 배포하는 경험을 쌓는 것입니다!
+
+이 튜토리얼을 마치면 서버를 다루는 능력에 자신감을 갖게되기를 바랍니다. 다음 앱을 만들 생각이 있다면 최소한의 노력으로 사람들 앞에서 앱을 얻을 수 있습니다.
