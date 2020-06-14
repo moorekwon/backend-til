@@ -720,25 +720,379 @@ compose를 이용하여 wordpress 만들기
 
 도커는 이미지를 만들기 위해 컨테이너의 상태를 그대로 이미지로 저장
 
+- 어떤 앱을 이미지로 만든다면 리눅스만 설치된 컨테이너에 앱을 설치하고 그 상태를 그대로 이미지로 저장
+- 가상머신의 스냅샷과 비슷한 방식
 
+컨테이너의 가벼운 특성과 레이어 개념을 이용해 생성과 테스트를 빠르게 수행 가능
 
 
 
 ### Sinatra 웹 애플리케이션 샘플
 
+Ruby로 만들어진 간단한 웹 앱을 도커라이징(도커 이미지 만듦)
+
+- Gemfile: 패키지 관리
+- app.rb: 호스트명을 출력하는 웹 서버 생성
+
+
+
+패키지 설치하고 서버 실행
+
+```shell
+bundle install # 패키지 설치
+bundle exec ruby app.rb # sinatra 실행
+```
+
+
+
+ruby가 설치돼 있지 않아도 도커만 있으면 됨
+
+```shell
+docker run --rm \
+-p 4567:4567 \
+-v $PWD:/usr/src/app \
+-w /usr/src/app \
+ruby \
+bash -c 'bundle install && bundle exec ruby app.rb -o 0.0.0.0'
+```
+
+- 호스트의 디렉토리를 ruby가 설치된 컨테이너의 디렉토리에 마운트한 후 그대로 명령어 실행
+- 로컬에 개발 환경을 구축하지 않고 도커 컨테이너를 개발환경으로 사용 가능
+- 도커를 개발환경으로 사용하면 개발=테스트=운영이 동일한 환경에서 실행
+
+
+
+서버가 정상적으로 실행됐으면 웹 브라우저에서 테스트
+
+- `http://localhost:4567`
+
+- 도커 컨테이너의 호스트명이 보임
+
+
+
 ### Ruby Application Dockerfile
+
+도커 이미지 만들기
+
+- 도커는 이미지를 만들기 위해 **Dockerfile** 이미지 빌드용 DSL(Domain Specific Language) 파일 사용
+- 일단 리눅스 서버에서 테스트로 설치해보고 안되면 될 때까지 최적의 과정을 Dockerfile로 작성 필요
+
+
+
+Ruby 웹 앱을 ubuntu에 배포
+
+1. ubuntu 설치
+2. ruby 설치
+3. 소스 복사
+4. Gem 패키지 설치
+5. Sinatra 서버 실행
+
+
+
+쉘 스크립트로 옮김
+
+```sh
+# ubuntu 설치 (패키지 업데이트)
+apt-get update
+
+# ruby 설치
+apt-get install ruby
+gem install bundler
+
+# 소스 복사
+mkdir -p /usr/src/app
+scp Gemfile app.rb root@ubuntu:/usr/src/app # 호스트에서
+
+# Gem 패키지 설치
+bundle install
+
+# Sinatra 서버 실행
+bundle exec ruby app.rb
+```
+
+
+
+이 과정을 Dockerfile로 빌드 파일 만듦
+
+```dockerfile
+# ubuntu 설치 (패키지 업데이트 + 만든사람 표시)
+FROM 			ubuntu:16.04
+MAINTAINER 		subicura@subicura.com
+# -y 옵션: 도커 빌드 중엔 키보드를 입력할 수 없으므로 (y/n)을 물어보는 걸 방지
+RUN 			apt-get -y update
+
+# ruby 설치
+RUN 			apt-get -y install ruby
+RUN 			gem install bundler
+
+# 소스 복사
+COPY 			. /usr/src/app
+
+# Gem 패키지 설치 (실행 디렉토리 설정)
+WORKDIR 		/usr/src/app
+RUN 			bundle install
+
+# Sinatra 서버 실행 (Listen 포트 정의)
+EXPOSE 			4567
+CMD 			bundle exec ruby app.rb -o 0.0.0.0
+```
+
+
 
 ### Docker build
 
+이미지 만들기
+
+- 이미지 빌드 명령어: `docker build [OPTIONS] PATH | URL | -`
+- `-t(--tag)` 옵션: 생성할 이미지 이름 지정
+
+
+
+Dockerfile 만든 디렉토리로 이동해 명령어 입력
+
+- `docker build -t app .`
+
+- Dockerfile에 정의한 내용이 한 줄 한 줄 실행
+- 실제로 명령어를 실행하므로 빌드 시간이 꽤 걸림
+- 최종적은 `Successfully built xxxxxxxx` 메시지 -> 정상적으로 이미지 생성
+
+
+
+이미지가 잘 생성됐는지 확인
+
+- `docker images`
+
+
+
+잘 동작하는지 컨테이너 실행
+
+- `docker run -d -p 8000:4567 app`
+- `docker run -d -p 8001:4567 app`
+- `docker run -d -p 8002:4567 app`
+- 호스트 네임 출력하는 웹 서버 3개 생성
+
+
+
 ### Dockerfile 기본 명령어
+
+이미지를 만드는 데 사용한 Dockerfile의 기본적인 명령어
+
+- FROM
+  - `FROM <image>:<tag>` ex) `FROM ubuntu:16.04`
+  - 베이스 이미지 (반드시) 지정
+  - tag: 될 수 있으면 latest(기본값)보다 구체적인 버전 지정 권장
+  - 이미 만들어진 다양한 베이스 이미지는 Docker hub에서 확인 가능
+- MAINTAINER
+  - `MAINTAINER <name>` ex) `MAINTAINER subicura@subicura.com`
+  - Dockerfile을 관리하는 사람 이름 또는 이메일 정보
+  - 빌드에 딱히 영향 없음
+- COPY
+  - `COPY <src> ... <dest>` ex) `COPY . /usr/src/app`
+  - 파일이나 디렉토리를 이미지로 복사
+  - 일반적으로 소스 복사에 사용
+  - `target` 디렉토리가 없으면 자동으로 생성
+- ADD
+  - `ADD <src> ... <dest>` ex) `ADD . /usr/src/app`
+  - `COPY` 명령어와 매우 유사하나 몇가지 추가 기능 존재
+  - `src`에 파일 대신 URL 입력 가능
+  - `src`에 압축 파일을 입력하는 경우 자동으로 압축 해제하면서 복사
+- RUN
+  - `RUN <command>`, `RUN ["executable", "param1", "param2"]` ex) `RUN bundle install`
+  - 명령어를 그대로 실행
+  - 내부적으로 `/bin/sh -c` 뒤에 명령어를 실행하는 방식
+- CMD
+  - `CMD ["executable", "param1", "param2"]`, `CMD command param1 param2` ex) `CMD bundle exec ruby app.rb`
+  - 도커 컨테이너가 실행됐을 때 실행되는 명령어를 정의
+  - 빌드할 때는 실행되지 않고, 여러 개의 `CMD`가 존재할 경우 가장 마지막 `CMD`만 실행
+  - 한꺼번에 여러 개의 프로그램을 실행하고 싶은 경우 `run.sh` 파일을 작성해 데몬으로 실행하거나 supervisord나 forego 등 여러 개의 프로그램을 실행하는 프로그램을 사용
+- WORKDIR
+  - `WORKDIR /path/to/workdir`
+  - RUN, CMD, ADD, COPY 등이 이루어질 기본 디렉토리 설정
+  - 각 명령어의 현재 디렉토리는 한 줄 한 줄마다 초기화
+  - `RUN cd /path` 하더라도 다음 명령어에선 다시 위치가 초기화
+  - 같은 디렉토리에서 계속 작업하기 위해 사용
+- EXPOSE
+  - `EXPOSE <port> [<port> ...]` ex) `EXPOSE 4567`
+  - 도커 컨테이너가 실행됐을 때 요청을 기다리고 있는(Listen) 포트를 지정
+  - 여러 개의 포트 지정 가능
+- VOLUME
+  - `VOLUME ["/data"]`
+  - 컨테이너 외부에 파일시스템을 마운트할 때 사용
+  - 반드시 지정하지 않아도 마운트할 수 있찌만, 기본적으로 지정 권장
+- ENV
+  - `ENV <key> <value>`, `ENV <key>=<value> ...` ex) `ENV DB_URL mysql`
+  - 컨테이너에서 사용할 환경변수 지정
+  - 컨테이너 실행할 때 `-e` 옵션 사용하면 기본값을 오버라이딩
+
+
 
 ### Build 분석
 
+빌드 하면서 도커가 Dockerfile을 갖고 무슨 일을 하는지 build 로그를 보면서 분석
+
+```shell
+# build context: 빌드 명령어를 실행한 디렉토리의 파일들
+# 이 파일들을 도커 서버(daemon)로 전송
+# 도커는 서버-클라이언트 구조이므로 도커 서버가 작업하려면 미리 파일을 전송해야 함
+Sending build context to Docker daemon  5.12 kB
+
+# Dockerfile을 한 줄 한 줄 수행
+# 첫 번째로 FROM 명령어 수행
+# ubuntu:16.04 이미지 다운
+Step 1/10 : FROM ubuntu:16.04
+
+# 명령어 수행 결과를 이미지로 저장
+# ubuntu:16.04를 사용하기로 했으므로 ubuntu 이미지의 ID가 표시
+ ---> f49eec89601e
+ 
+# Dockerfile의 두 번째 명령어 MAINTAINER 명령어 수행
+Step 2/10 : MAINTAINER subicura@subicura.com
+
+# 명령어를 수행하기 위해 바로 이전에 생성된 이미지 기반으로 그 컨테이너를 임시로 생성해 실행
+ ---> Running in f4de0c750abb
+ 
+ # 명령어 수행 결과를 이미지로 저장
+ ---> 4a400609ff73          
+ 
+# 명령어를 수행하기 위해 임시로 만들었던 컨테이너 제거
+Removing intermediate container f4de0c750abb
+
+# Dockerfile의 세 번째 명령어 수행
+# 바로 전에 만들어진 이미지 기반으로 임시 컨테이너를 만들어 명령어 실행하고 그 결과 상태를 이미지로 생성
+# 마지막 줄까지 무한 반복
+Step 3/10 : RUN apt-get -y update  
+...
+...
+
+# 최종 성공한 이미지 ID 출력
+Successfully built 20369cef9829
+```
+
+- 도커 빌드는 `임시 컨테이너 생성` -> `명령어 수행` -> `이미지로 저장` -> `임시 컨테이너 삭제` -> `새로 만든 이미지 기반 임시 컨테이너 생성` -> `명령어 수행` -> `이미지로 저장` -> `임시 컨테이너 삭제` -> ... 과정을 계속 반복
+- 명령어를 실행할 때마다 이미지 레이어를 저장하고 다시 빌드할 때 Dockerfile이 변경되지 않았다면 기존에 저장된 이미지를 그대로 캐시처럼 사용
+
+
+
 ### 도커 이미지 리팩토링
 
+앞에서 만든 이미지의 몇 가지 최적화 문제
 
+- Base Image
+
+  - 위에서 만든 Ruby 앱 이미지는 `ubuntu` 베이스로 만들었지만 사실 훨씬 간단한 `ruby` 베이스 이미지 존재
+  - 기존에 ruby를 설치했던 명령어는 ruby 이미지를 사용하는 것으로 간단히 생략
+
+  ```dockerfile
+  # before
+  FROM 			ubuntu:16.04
+  MAINTAINER 		subicura@subicura.com
+  RUN 			apt-get -y update
+  RUN 			apt-get -y install ruby
+  RUN 			gem install bundler
+  
+  # after
+  FROM 			ruby:2.3
+  MAINTAINER 		subicura@subicura.com
+  ```
+
+  - ruby, nodejs, python, java, go 등 다양한 베이스 이미지가 이미 존재하므로 세부적인 설정이 필요하지 않으면 그대로 사용하는게 간편
+
+- Build Cache
+
+  - 한 번 빌드한 이미지를 다시 빌드하면 굉장히 빠르게 완료
+
+  - 이미지를 빌드라는 과정에서 각 단계를 이미지 레이어로 저장하고 다음 빌드에서 캐시로 사용
+
+  - 도커는 빌드할 때 Dockerfile 명령어가 수정됐거나 추가하는 파일이 변경됐을 때 캐시가 깨지고 그 이후 작업은 새로 이미지를 생성
+
+  - ruby gem 패키지를 설치하는 과정을 꽤 많은 시간이 소요되므로 최대한 캐시를 이용해 빌드 시간 단축
+
+  - 기존 소스에서 소스파일이 수정되면서 캐시가 깨지는 부분
+
+    ```dockerfile
+    COPY 		. /usr/src/app # 소스파일이 변경되면 캐시가 깨짐
+    WORKDIR 	/usr/src/app
+    RUN 		bundel install # 패키지를 추가하지 않았는데 또 인스톨
+    ```
+
+    - 복사하는 파일이 이전과 다르면 캐시 사용하지 않고 그 이후 명령어는 다시 실행
+    - ruby gem 패키지를 관리하는 파일은 Gemfile이고, 이 파일은 잘 수정되지 않음
+
+  - 순서 변경
+
+    ```dockerfile
+    COPY 		Gemfile* /usr/src/app/ # Gemfile 먼저 복사
+    WORKDIR 	/usr/src/app
+    RUN 		bundle install # 패키지 인스톨
+    COPY 		. /usr/src/app # 소스가 바꼈을 때 캐시가 깨지는 시점
+    ```
+
+    - gen 설치 부분을 소스 복사 이전으로 이동
+    - 소스가 수정돼도 매번 gem을 설치하지 않아 더욱 빠르게 빌드
+    - 요즘 언어들은 대부분 패키지 매니저를 사용하므로 비슷하게 작성하면 됨
+
+- 명령어 최적화
+
+  - 이미지를 빌드할 때 불필요한 로그는 무시하는게 좋고 패키지 설치 시 문서 파일 생성할 필요도 없음
+
+    ```dockerfile
+    # before
+    RUN apt-get -y update
+    
+    # after
+    RUN apt-get -y -qq update
+    ```
+
+    - `-qq` 옵션: 로그를 출력하지 않게 함
+      - 각종 리눅스 명령어는 보통 `quite` 옵션이 있으므로 적절히 적용
+
+    ```dockerfile
+    # before
+    RUN bundle install
+    
+    # after
+    RUN bundle install --no-rdoc --no-ri
+    ```
+
+    - `--no-doc`, `--no-ri` 옵션: 필요없는 문서를 생성하지 않아 이미지 용량도 줄이고 빌드 속도도 빨라짐
+
+- 이쁘게
+
+  - 명령어는 비슷한 것끼리 묶어주는 게 더 보기 좋고 레이어 수 줄이는 데 도움
+  - 도커 이미지는 스토리지 엔진에 따라 레이어 개수가 127개로 제한되어 있는 경우도 있으므로 너무 많은 명령어는 좋지 않음
+
+  ```dockerfile
+  # before
+  RUN apt-get -y -qq update
+  RUN apt-get -y -qq install ruby
+  
+  # after
+  RUN apt-get -y -qq update && \
+      apt-get -y -qq install ruby
+  ```
+
+- 최종
+
+  ```dockerfile
+  FROM 			ruby:2.3
+  MAINTAINER 		subicura@subicura.com
+  COPY 			Gemfile* /usr/src/app/
+  WORKDIR 		/usr/src/app
+  RUN 			bundle install --no-rdoc --no-ri
+  COPY 			. /usr/src/app
+  EXPOSE 			4567
+  CMD 			bundle exec ruby app.rb -o 0.0.0.0
+  ```
+
+  
 
 ## 이미지 저장소
+
+도커는 빌드한 이미지를 서버에 배포하기 위해 (직접 파일을 복사하는 방법 대신) **Docker Registry** 이미지 저장소 사용
+
+
+
+
 
 ### Docker Hub
 
