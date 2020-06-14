@@ -676,7 +676,7 @@ compose를 이용하여 wordpress 만들기
 
 1. 빈 디렉토리를 하나 만들고, `docker-compose.yml` 파일을 만들어 설정 입력
 
-   ```yml
+   ```
    version: '2'
    
    services:
